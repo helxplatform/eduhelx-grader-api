@@ -12,7 +12,7 @@ from app.models import StudentModel, InstructorModel
 from app.core.role_permissions import UserPermission
 from app.core.exceptions import (
     UnauthorizedException, MissingPermissionException, UserNotFoundException,
-    NotAStudentException, NotAnInstructorException
+    NotAStudentException, NotAnInstructorException, NotASuperuserException
 )
 
 class BasePermission(ABC):
@@ -43,6 +43,17 @@ class UserIsInstructorPermission(RequireLoginPermission):
 
         if not isinstance(self.user, InstructorModel):
             raise NotAnInstructorException()
+        
+# We'll define a superuser here as anything other than a student.
+# This definition is useful in endpoints where we want to allow
+# access to everyone other than students without restricting access
+# to just instructors. 
+class UserIsSuperuserPermission(RequireLoginPermission):
+    async def verify_permission(self, request: Request):
+        await super().verify_permission(request)
+
+        if isinstance(self.user, StudentModel):
+            raise NotASuperuserException()
         
 
 class BaseRolePermission(RequireLoginPermission):

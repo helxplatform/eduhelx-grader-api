@@ -1,5 +1,3 @@
-from typing import List
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import MultipleResultsFound, NoResultFound
 from app.models import CourseModel

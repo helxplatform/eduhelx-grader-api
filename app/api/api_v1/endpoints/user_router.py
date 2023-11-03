@@ -3,8 +3,10 @@
 from fastapi import APIRouter, Request, Depends
 from sqlalchemy.orm import Session
 from app.schemas import StudentSchema, InstructorSchema
-from app.services import UserService
-from app.core.dependencies import get_db
+from app.services import UserService, LDAPService
+from app.services.ldap_service import LDAPUserInfoSchema
+from app.core.dependencies import get_db, PermissionDependency, UserIsSuperuserPermission
+
 
 router = APIRouter()
 
@@ -17,3 +19,12 @@ async def get_own_user(
     onyen = request.user.onyen
     user = await UserService(db).get_user_by_onyen(onyen)
     return user
+
+@router.get("/users/{pid:str}/ldap", response_model=LDAPUserInfoSchema)
+async def get_ldap_user(
+    *,
+    request: Request,
+    perm: None = Depends(PermissionDependency(UserIsSuperuserPermission)),
+    pid: str
+):
+    return LDAPService().get_user_info(pid)

@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRES_MINUTES: int = 30 # 30 minutes
     REFRESH_TOKEN_EXPIRES_MINUTES: int = 60 * 24 * 30 # 1 month
 
+    # LDAP
+    LDAP_HOST: str
+    LDAP_PORT: int
+    LDAP_SERVICE_ACCOUNT_BIND_DN: str
+    LDAP_SERVICE_ACCOUNT_PASSWORD: str
+    LDAP_TIMEOUT_SECONDS: int = 5
+
     # Database
     POSTGRES_HOST: str
     POSTGRES_PORT: str = "5432"

@@ -2,6 +2,8 @@ import os
 import glob
 import subprocess
 import sys
+import uvicorn
+from app.main import app
 from dotenv import load_dotenv
 from alembic.config import Config
 from alembic import command

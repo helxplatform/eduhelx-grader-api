@@ -29,3 +29,8 @@ class NotAnInstructorException(CustomException):
     code = 403
     error_code = "USER__NOT_AN_INSTRUCTOR"
     message = "user is not an instructor"
+
+class NotASuperuserException(CustomException):
+    code = 403
+    error_code = "USER__NOT_A_SUPERUSER"
+    message = "user is not a superuser"
