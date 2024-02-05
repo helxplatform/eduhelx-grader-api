@@ -1,6 +1,7 @@
 from typing import Optional, Any, Dict, List
 from enum import Enum
 from pydantic import BaseModel, BaseSettings, PostgresDsn, Json, validator, root_validator
+import os.path
 
 class DevPhase(str, Enum):
     DEV = "dev"
@@ -21,6 +22,13 @@ class SetupWizardData(BaseModel):
     instructors: List[SetupWizardInstructor]
 
 class Settings(BaseSettings):
+
+    def __init__(self) -> None:
+        if os.path.isfile(".env.local"):
+            super().__init__(".env.local")
+        else:
+            super().__init__()
+
     # General config
     API_V1_STR: str = "/api/v1"
     DEV_PHASE: DevPhase = DevPhase.PROD
@@ -46,8 +54,8 @@ class Settings(BaseSettings):
     LDAP_TIMEOUT_SECONDS: int = 5
 
     # Database
-    POSTGRES_HOST: str
-    POSTGRES_PORT: str = "5432"
+    POSTGRES_HOST: str 
+    POSTGRES_PORT: str
     POSTGRES_DB: str
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
