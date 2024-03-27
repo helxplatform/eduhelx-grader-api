@@ -48,9 +48,10 @@ def main(host, port, reload):
     command.upgrade(alembic_cfg, "head")
 
 
-    # Run setup wizard, if required, in the background
+    # Run setup wizard, if required.
     try:
-        asyncio.create_task(setup_wizard.run())
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(setup_wizard.run())
     except ValueError as e:
         print(str(e))
 
