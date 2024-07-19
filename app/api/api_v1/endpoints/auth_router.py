@@ -49,7 +49,7 @@ async def appstore_login(
     appstore_service = AppstoreService(db, appstore_access_token, login_body.user_type)
     user = await appstore_service.get_associated_eduhelx_user()
     # If the user is authenticated in appstore with a corresponding onyen, we can create a token for them.
-    token = await UserService(db)._create_user_token(user)
+    token = await UserService(db).create_user_token(user)
     return token
         
 @router.put("/login/gitea/ssh", description="Set an SSH key for your Gitea user")

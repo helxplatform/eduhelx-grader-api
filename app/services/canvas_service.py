@@ -4,12 +4,14 @@ from pydantic import BaseModel
 from datetime import datetime
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 from app.core.config import settings
 from app.models import UserModel, OnyenPIDModel
 from app.services import UserService, UserType
 from app.core.exceptions import (
     LMSNoCourseFetchedException, LMSNoAssignmentFetchedException, LMSNoStudentsFetchedException,
-    LMSUserNotFoundException, LMSUserPIDAlreadyAssociatedException, LMSBackendException
+    LMSUserNotFoundException, LMSUserPIDAlreadyAssociatedException, LMSBackendException,
+    DatabaseTransactionException
 )
 
 class UpdateCanvasAssignmentBody(BaseModel):
@@ -18,12 +20,8 @@ class UpdateCanvasAssignmentBody(BaseModel):
     due_date: datetime | None
 
 class CanvasService:
-    def __init__(self, db: Session):
-        self.db = db
-        self.session = requests.Session()
-        self.session.headers.update({
-            "Authorization": f"Bearer {settings.CANVAS_API_KEY}"
-        })
+    def __init__(self, session: Session):
+        self.session = session
         self.client = httpx.AsyncClient(
             base_url=f"{ self.api_url }",
             headers={
@@ -133,13 +131,13 @@ class CanvasService:
         })
 
     async def get_onyen_from_pid(self, pid: str) -> UserModel:
-        pid_onyen = self.db.query(OnyenPIDModel).filter_by(pid=pid).first()
+        pid_onyen = self.session.query(OnyenPIDModel).filter_by(pid=pid).first()
         if pid_onyen is None:
             raise LMSUserNotFoundException(f'LMS user with pid "{ pid }" does not exist')
-        return await UserService(self.db).get_user_by_onyen(pid_onyen.onyen)
+        return await UserService(self.session).get_user_by_onyen(pid_onyen.onyen)
 
     async def get_pid_from_onyen(self, onyen: str) -> str:
-        pid_onyen = self.db.query(OnyenPIDModel).filter_by(onyen=onyen).first()
+        pid_onyen = self.session.query(OnyenPIDModel).filter_by(onyen=onyen).first()
         if pid_onyen is None:
             raise LMSUserNotFoundException(f'LMS user with onyen "{ onyen }" does not exist')
         return pid_onyen.pid
@@ -148,27 +146,49 @@ class CanvasService:
     I would recommend for clarity first calling unassociate_pid_from_user when modifying a mapping.
     If there's a chance the PID is already associated with a different user, this method will throw. """
     async def associate_pid_to_user(self, onyen: str, pid: str) -> None:
-        existing_mapping = self.db.query(OnyenPIDModel).filter((OnyenPIDModel.onyen == onyen) | (OnyenPIDModel.pid == pid)).first()
-        if existing_mapping is not None:
-            if existing_mapping.onyen == onyen and existing_mapping.pid == pid:
-                # Already associated, no further action required.
-                return
-            elif existing_mapping.onyen == onyen:
-                # The Eduhelx user is currently associated with a different PID, update it.
-                existing_mapping.pid = pid
-                self.db.commit()
-                return
-            elif existing_mapping.pid == pid:
-                # This PID is already associated with a different Eduhelx user.
-                # We don't want to assume it's okay to unassociate them, that's the caller's job. 
-                raise LMSUserPIDAlreadyAssociatedException()
-        else:
-            self.db.add(OnyenPIDModel(onyen=onyen, pid=pid))
-            self.db.commit()
+        with self.session.begin_nested():
+            existing_mapping = self.session.query(OnyenPIDModel) \
+                .filter((OnyenPIDModel.onyen == onyen) | (OnyenPIDModel.pid == pid)) \
+                .first()
+            
+            if existing_mapping is not None:
+                if existing_mapping.onyen == onyen and existing_mapping.pid == pid:
+                    # Already associated, no further action required.
+                    return
+                
+                elif existing_mapping.onyen == onyen:
+                    # The Eduhelx user is currently associated with a different PID, update it.
+                    existing_mapping.pid = pid
+                    try:
+                        self.session.flush()
+                    except SQLAlchemyError as e:
+                        DatabaseTransactionException.raise_exception(e)
+                    return
+                
+                elif existing_mapping.pid == pid:
+                    # This PID is already associated with a different Eduhelx user.
+                    # We don't want to assume it's okay to unassociate them, that's the caller's job. 
+                    raise LMSUserPIDAlreadyAssociatedException()
+            
+            else:
+                self.session.add(OnyenPIDModel(onyen=onyen, pid=pid))
+                try:
+                    self.session.flush()
+                except SQLAlchemyError as e:
+                    DatabaseTransactionException.raise_exception(e)
+
+        self.session.commit()
         
     async def unassociate_pid_from_user(self, onyen: str) -> None:
-        pid_onyen = self.db.query(OnyenPIDModel).filter_by(onyen=onyen).first()
-        if pid_onyen is None:
-            raise LMSUserNotFoundException()
-        self.db.delete(pid_onyen)
-        self.db.commit()
+        with self.session.begin_nested():
+            pid_onyen = self.session.query(OnyenPIDModel).filter_by(onyen=onyen).first()
+            if pid_onyen is None:
+                raise LMSUserNotFoundException()
+            
+            self.session.delete(pid_onyen)
+            try:
+                self.session.flush()
+            except SQLAlchemyError as e:
+                DatabaseTransactionException.raise_exception(e)
+        
+        self.session.commit()

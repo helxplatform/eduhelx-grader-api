@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
-from app.events import dispatch
+from sqlalchemy.exc import SQLAlchemyError
+from app.events import event_emitter
 from app.models import UserModel, AutoPasswordAuthModel
 from app.events import DeleteUserCrudEvent
 from app.schemas import RefreshTokenSchema
@@ -10,7 +11,8 @@ from app.core.middleware.authentication import CurrentUser
 from app.core.exceptions import (
     PasswordDoesNotMatchException,
     UserNotFoundException,
-    PasswordDoesNotMatchException
+    PasswordDoesNotMatchException,
+    DatabaseTransactionException
 )
 
 class UserService:
@@ -35,7 +37,7 @@ class UserService:
             raise UserNotFoundException()
         return user
     
-    async def _create_user_token(self, user: UserModel) -> RefreshTokenSchema:
+    async def create_user_token(self, user: UserModel) -> RefreshTokenSchema:
         current_user = CurrentUser(id=user.id, onyen=user.onyen)
 
         response = RefreshTokenSchema(
@@ -52,7 +54,7 @@ class UserService:
         if not PasswordHelper.verify_password(autogen_password, user_auth.autogen_password_hash):
             raise PasswordDoesNotMatchException()
 
-        return await self._create_user_token(user)
+        return await self.create_user_token(user)
     
     async def create_user_auto_password_auth(self, onyen: str) -> str:
         from app.services import CourseService, KubernetesService
@@ -60,22 +62,27 @@ class UserService:
         autogen_password = PasswordHelper.generate_password(64)
         autogen_password_hash = PasswordHelper.hash_password(autogen_password)
 
-        user_auth = AutoPasswordAuthModel(
-            onyen=onyen,
-            autogen_password_hash=autogen_password_hash
-        )
-        self.session.add(user_auth)
+        with self.session.begin_nested():
+            user_auth = AutoPasswordAuthModel(
+                onyen=onyen,
+                autogen_password_hash=autogen_password_hash
+            )
+            self.session.add(user_auth)
+            try:
+                self.session.flush()
+            except SQLAlchemyError as e:
+                DatabaseTransactionException.raise_exception(e)
+                
+            course = await CourseService(self.session).get_course()
+            user = await self.get_user_by_onyen(onyen)
+            KubernetesService().create_credential_secret(
+                course_name=course.name,
+                onyen=onyen,
+                password=autogen_password,
+                user_type=user.user_type
+            )
+
         self.session.commit()
-
-        course = await CourseService(self.session).get_course()
-        user = await self.get_user_by_onyen(onyen)
-        KubernetesService().create_credential_secret(
-            course_name=course.name,
-            onyen=onyen,
-            password=autogen_password,
-            user_type=user.user_type
-        )
-
         return autogen_password
 
     async def delete_user(
@@ -90,14 +97,27 @@ class UserService:
         password = KubernetesService().get_autogen_password(course.name, onyen)
         cleanup_service = CleanupService.User(self.session, user, password)
 
-        KubernetesService().delete_credential_secret(course.name, onyen)
-        try:
-            await GiteaService().delete_user(onyen, purge=True)
-        except Exception as e:
-            await cleanup_service.undo_delete_user(create_password_secret=True)
-            raise e
+        with self.session.begin_nested():
+            self.session.delete(user)
+            try:
+                self.session.flush()
+            except SQLAlchemyError as e:
+                DatabaseTransactionException.raise_exception(e)
 
-        self.session.delete(user)
+            KubernetesService().delete_credential_secret(course.name, onyen)
+            try:
+                await GiteaService().delete_user(onyen, purge=True)
+            except Exception as e:
+                await cleanup_service.undo_delete_user(create_password_secret=True)
+                raise e
+            
+            try:
+                # BUG: Similar to HLXK-286, there's no way to rollback a user deletion in Gitea.
+                # Dispatching could fail and needs cleanup, but at the moment, no way to do it,
+                # so just pretend the dispatch error doesn't really matter.
+                await event_emitter.emit_async(DeleteUserCrudEvent(user=user))
+            except:
+                # TODO: CLEANUP and raise e
+                pass
+
         self.session.commit()
-
-        dispatch(DeleteUserCrudEvent(user=user))

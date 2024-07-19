@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.services import AssignmentService
+from app.schemas import CommitSchema
 from app.core.utils.header import parse_content_disposition_header
 import httpx
 import base64
@@ -218,6 +219,23 @@ class GiteaService:
         file_stream = BytesIO(res.content)
         file_stream.name = file_name
         return file_stream
+    
+    async def get_commits(
+        self,
+        name: str,
+        owner: str,
+        branch_name: str
+    ) -> List[CommitSchema]:
+        res = await self._get("/repos/commits", params={
+            "name": name,
+            "owner": owner,
+            "branch": branch_name
+        })
+        raw_commits = res.json()
+        return [
+            CommitSchema.from_gitea(raw_commit)
+            for raw_commit in raw_commits
+        ]
     
     async def modify_repository_files(
         self,

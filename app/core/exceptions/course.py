@@ -14,3 +14,8 @@ class CourseAlreadyExistsException(CustomException):
     code = 409
     error_code = "COURSE__ALREADY_EXISTS"
     message = "course already exists, try modifying the existing course instead"
+
+class CourseEndsBeforeStartDateException(CustomException):
+    code = 400
+    error_code = "COURSE__ENDS_BEFORE_START"
+    message = "course cannot end before it has started"
