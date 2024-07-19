@@ -9,3 +9,4 @@ from .gitea_service import *
 from .appstore_service import *
 from .lms_sync_service import *
 from .cleanup_service import *
+from .websocket_service import *

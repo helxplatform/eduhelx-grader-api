@@ -1,9 +1,9 @@
-from .dispatcher import dispatch
+from .emitter import event_emitter
 
 # For use with static events.
-def dispatches(*args, **kwargs):
+def emits(*args, **kwargs):
     def inner(func):
         result = func()
-        dispatch(*args, **kwargs)
+        event_emitter.emit_future(*args, **kwargs)
         return result
     return inner

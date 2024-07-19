@@ -2,7 +2,7 @@ import enum
 from sqlalchemy import Column, Sequence, Integer, Text, Enum, ForeignKey
 from sqlalchemy.orm import relationship
 from app.database import Base
-from app.core.role_permissions import UserRoleType
+from app.core.role_permissions import UserPermission, UserRoleType
 
 class UserType(enum.Enum):
     STUDENT = "student"
@@ -27,3 +27,9 @@ class UserModel(Base):
         "polymorphic_on": "user_type",
         "polymorphic_identity": "user"
     }
+
+    def has_permission(self, permission: UserPermission) -> bool:
+        return permission in self.role.permission
+    
+    def has_access(self, resource) -> bool:
+        raise NotImplementedError("TODO") # HLXK-288

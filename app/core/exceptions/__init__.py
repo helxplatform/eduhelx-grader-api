@@ -8,3 +8,4 @@ from .course import *
 from .ldap import *
 from .appstore import *
 from .lms import *
+from .database import *

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Type
 
-from fastapi import Request
+from fastapi.requests import HTTPConnection
 from fastapi.openapi.models import APIKey, APIKeyIn
 from fastapi.security.base import SecurityBase
 
@@ -20,25 +20,25 @@ class BasePermission(ABC):
         self.user = user
 
     @abstractmethod
-    async def verify_permission(self, request: Request):
+    async def verify_permission(self, conn: HTTPConnection):
         pass
 
 # For endpoints that require a user to be logged in, but nothing beyond that.
 class RequireLoginPermission(BasePermission):
-    async def verify_permission(self, request: Request):
+    async def verify_permission(self, conn: HTTPConnection):
         if self.user is None or self.user.role is None:
             raise UnauthorizedException()
 
 class UserIsStudentPermission(RequireLoginPermission):
-    async def verify_permission(self, request: Request):
-        await super().verify_permission(request)
+    async def verify_permission(self, conn: HTTPConnection):
+        await super().verify_permission(conn)
         
         if not isinstance(self.user, StudentModel):
             raise NotAStudentException()
 
 class UserIsInstructorPermission(RequireLoginPermission):
-    async def verify_permission(self, request: Request):
-        await super().verify_permission(request)
+    async def verify_permission(self, conn: HTTPConnection):
+        await super().verify_permission(conn)
 
         if not isinstance(self.user, InstructorModel):
             raise NotAnInstructorException()
@@ -48,8 +48,8 @@ class UserIsInstructorPermission(RequireLoginPermission):
 # access to everyone other than students without restricting access
 # to just instructors. 
 class UserIsSuperuserPermission(RequireLoginPermission):
-    async def verify_permission(self, request: Request):
-        await super().verify_permission(request)
+    async def verify_permission(self, conn: HTTPConnection):
+        await super().verify_permission(conn)
 
         if isinstance(self.user, StudentModel):
             raise NotASuperuserException()
@@ -58,8 +58,8 @@ class UserIsSuperuserPermission(RequireLoginPermission):
 class BaseRolePermission(RequireLoginPermission):
     permission: UserPermission
 
-    async def verify_permission(self, request: Request):
-        await super().verify_permission(request)
+    async def verify_permission(self, conn: HTTPConnection):
+        await super().verify_permission(conn)
 
         for permission in self.user.role.permissions:
             if permission == self.permission:
@@ -121,11 +121,11 @@ class PermissionDependency(SecurityBase):
         self.model: APIKey = APIKey(**{"in": APIKeyIn.header}, name="Authorization")
         self.scheme_name = self.__class__.__name__
 
-    async def __call__(self, request: Request):
+    async def __call__(self, conn: HTTPConnection):
         from app.services import UserService
         
         if settings.DISABLE_AUTHENTICATION and settings.IMPERSONATE_USER is not None:
-            if request.user.onyen is None:
+            if conn.user.onyen is None:
                 raise UserNotFoundException(f'The impersonated user "{ settings.IMPERSONATE_USER }" does not exist.')
         elif settings.DISABLE_AUTHENTICATION and settings.IMPERSONATE_USER is None:
             # If authentication is disabled, we treat the anonymous user as if they have every permission.
@@ -133,10 +133,10 @@ class PermissionDependency(SecurityBase):
 
         with SessionLocal() as session:
             try:
-                user = await UserService(session).get_user_by_onyen(request.user.onyen)
+                user = await UserService(session).get_user_by_onyen(conn.user.onyen)
             except UserNotFoundException:
                 user = None
             
             for permission in self.permissions:
                 cls = permission(session, user)
-                await cls.verify_permission(request=request)
+                await cls.verify_permission(conn=conn)

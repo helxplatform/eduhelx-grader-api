@@ -5,3 +5,5 @@ from .extra_time import *
 from .course import *
 from .jwt import *
 from .settings import *
+from .gitea import *
+from .websocket import *

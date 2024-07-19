@@ -1,6 +1,5 @@
 from enum import Enum
-from pydantic import BaseModel
-from fastapi_events.registry.payload_schema import registry
+from app.events.emitter import PydanticEvent
 from app.models import CourseModel, AssignmentModel, SubmissionModel, UserModel, StudentModel, InstructorModel
 from app.models.user import UserType
 
@@ -8,6 +7,12 @@ class CrudType(str, Enum):
     CREATE = "CREATE"
     MODIFY = "MODIFY"
     DELETE = "DELETE"
+
+class ResourceType(str, Enum):
+    COURSE = "COURSE"
+    USER = "USER"
+    ASSIGNMENT = "ASSIGNMENT"
+    SUBMISSION = "SUBMISSION"
 
 class CrudEvents(Enum):
     CREATE_COURSE = "crud:course:create"
@@ -26,37 +31,28 @@ class CrudEvents(Enum):
     MODIFY_SUBMISSION = "crud:submission:modify"
     DELETE_SUBMISSION = "crud:submission:delete"
 
-class CrudEvent(BaseModel):
-    __event_name__: str
-    modified_fields: list[str] | None = None
-
-    @property
-    def crud_type(self):
-        return self.__event_name__.split("_")[0]
-
-    @property
-    def resource_type(self):
-        return self.__event_name__.split("_")[1]
-
-    class Config:
-        arbitrary_types_allowed = True
+class CrudEvent(PydanticEvent):
+    crud_type: CrudType
+    resource_type: ResourceType
 
 class CourseCrudEvent(CrudEvent):
     course: CourseModel
+    resource_type = ResourceType.COURSE
 
-@registry.register
 class CreateCourseCrudEvent(CourseCrudEvent):
-    __event_name__ = CrudEvents.CREATE_COURSE
-@registry.register
+    __event_name__ = CrudEvents.CREATE_COURSE.value
+    crud_type = CrudType.CREATE
 class ModifyCourseCrudEvent(CourseCrudEvent):
-    __event_name__ = CrudEvents.MODIFY_COURSE
-@registry.register
+    __event_name__ = CrudEvents.MODIFY_COURSE.value
+    crud_type = CrudType.MODIFY
 class DeleteCourseCrudEvent(CourseCrudEvent):
-    __event_name__ = CrudEvents.DELETE_COURSE
+    __event_name__ = CrudEvents.DELETE_COURSE.value
+    crud_type = CrudType.DELETE
 
 
 class UserCrudEvent(CrudEvent):
     user: UserModel
+    resource_type = ResourceType.USER
 
     @property
     def user_type(self):
@@ -68,41 +64,42 @@ class UserCrudEvent(CrudEvent):
 
         raise NotImplementedError
 
-@registry.register
 class CreateUserCrudEvent(UserCrudEvent):
-    __event_name__ = CrudEvents.CREATE_USER
-@registry.register
+    __event_name__ = CrudEvents.CREATE_USER.value
+    crud_type = CrudType.CREATE
 class ModifyUserCrudEvent(UserCrudEvent):
-    __event_name__ = CrudEvents.MODIFY_USER
-@registry.register
+    __event_name__ = CrudEvents.MODIFY_USER.value
+    crud_type = CrudType.MODIFY
 class DeleteUserCrudEvent(UserCrudEvent):
-    __event_name__ = CrudEvents.DELETE_USER
+    __event_name__ = CrudEvents.DELETE_USER.value
+    crud_type = CrudType.DELETE
 
 
 class AssignmentCrudEvent(CrudEvent):
     assignment: AssignmentModel
+    resource_type = ResourceType.ASSIGNMENT
 
-@registry.register
 class CreateAssignmentCrudEvent(AssignmentCrudEvent):
-    __event_name__ = CrudEvents.CREATE_ASSIGNMENT
-@registry.register
+    __event_name__ = CrudEvents.CREATE_ASSIGNMENT.value
+    crud_type = CrudType.CREATE
 class ModifyAssignmentCrudEvent(AssignmentCrudEvent):
-    __event_name__ = CrudEvents.MODIFY_ASSIGNMENT
-@registry.register
+    __event_name__ = CrudEvents.MODIFY_ASSIGNMENT.value
+    crud_type = CrudType.MODIFY
 class DeleteAssignmentCrudEvent(AssignmentCrudEvent):
-    __event_name__ = CrudEvents.DELETE_ASSIGNMENT
+    __event_name__ = CrudEvents.DELETE_ASSIGNMENT.value
+    crud_type = CrudType.DELETE
 
 
 class SubmissionCrudEvent(CrudEvent):
     submission: SubmissionModel
+    resource_type = ResourceType.SUBMISSION
 
-@registry.register
 class CreateSubmissionCrudEvent(SubmissionCrudEvent):
-    __event_name__ = CrudEvents.CREATE_SUBMISSION
-@registry.register
+    __event_name__ = CrudEvents.CREATE_SUBMISSION.value
+    crud_type = CrudType.CREATE
 class ModifySubmissionCrudEvent(SubmissionCrudEvent):
-    __event_name__ = CrudEvents.MODIFY_SUBMISSION
-@registry.register
+    __event_name__ = CrudEvents.MODIFY_SUBMISSION.value
+    crud_type = CrudType.MODIFY
 class DeleteSubmissionCrudEvent(SubmissionCrudEvent):
-    __event_name__ = CrudEvents.DELETE_SUBMISSION
-
+    __event_name__ = CrudEvents.DELETE_SUBMISSION.value
+    crud_type = CrudType.DELETE
