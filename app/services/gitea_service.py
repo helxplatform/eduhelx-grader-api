@@ -363,7 +363,7 @@ fi
         assignments = await assignment_service.get_assignments()
         init_assignments_assoc = []
         for assignment in assignments:
-            if assignment.is_created:
+            if assignment.available_date is not None and assignment.due_date is not None:
                 # Until HLXK-265, merge control policy is ALWAYS active.
                 earliest_datetime = datetime.now(tz.UTC)
                 # earliest_datetime = await assignment_service.get_earliest_available_date(assignment)

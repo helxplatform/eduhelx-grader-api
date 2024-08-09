@@ -69,7 +69,8 @@ class LmsSyncService:
                 await self.assignment_service.update_assignment(db_assignment, UpdateAssignmentSchema(
                     name=assignment["name"],
                     available_date=assignment["unlock_at"],
-                    due_date=assignment["due_at"]
+                    due_date=assignment["due_at"],
+                    is_published=assignment["published"]
                 ))
 
             except AssignmentNotFoundException as e:
@@ -79,7 +80,8 @@ class LmsSyncService:
                     name=assignment['name'], 
                     due_date=assignment['due_at'], 
                     available_date=assignment['unlock_at'],
-                    directory_path=assignment['name']
+                    directory_path=assignment['name'],
+                    is_published=assignment['published']
                 )
         
         return canvas_assignments

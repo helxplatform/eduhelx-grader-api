@@ -22,10 +22,7 @@ class AssignmentModel(Base):
     available_date = Column(DateTime(timezone=True))
     due_date = Column(DateTime(timezone=True))
     last_modified_date = Column(DateTime(timezone=True), server_default=func.current_timestamp())
-
-    @hybrid_property
-    def is_created(self):
-        return self.available_date is not None and self.due_date is not None
+    is_published = Column(Boolean, server_default='f', nullable=False)
     
     @hybrid_property
     def student_notebook_path(self) -> str:

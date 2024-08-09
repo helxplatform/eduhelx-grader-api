@@ -17,8 +17,7 @@ class AssignmentSchema(BaseModel):
     available_date: datetime | None
     due_date: datetime | None
     last_modified_date: datetime
-    # Has both an available_date and due_date set
-    is_created: bool
+    is_published: bool
 
     class Config:
         orm_mode = True
@@ -30,6 +29,7 @@ class UpdateAssignmentSchema(BaseModel):
     grader_question_feedback: bool = UNSET
     available_date: datetime | None
     due_date: datetime | None
+    is_published: bool = UNSET
 
 # Adds in fields relevant for JLP (tailored to the professor)
 class InstructorAssignmentSchema(AssignmentSchema):

@@ -23,6 +23,7 @@ class UpdateAssignmentBody(BaseModel):
     grader_question_feedback: bool = UNSET
     available_date: datetime | None
     due_date: datetime | None
+    is_published: bool = UNSET
 
 class GradingBody(BaseModel):
     master_notebook_content: str

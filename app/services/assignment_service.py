@@ -9,7 +9,7 @@ from app.schemas import AssignmentSchema, InstructorAssignmentSchema, StudentAss
 from app.events import CreateAssignmentCrudEvent, ModifyAssignmentCrudEvent, DeleteAssignmentCrudEvent
 from app.core.exceptions import (
     AssignmentNotFoundException,
-    AssignmentNotCreatedException,
+    AssignmentNotPublishedException,
     AssignmentNotOpenException,
     AssignmentClosedException,
     AssignmentDueBeforeOpenException
@@ -25,7 +25,8 @@ class AssignmentService:
         name: str,
         directory_path: str,
         available_date: datetime | None,
-        due_date: datetime | None
+        due_date: datetime | None,
+        is_published: bool
     ) -> AssignmentModel:
         from app.services import GiteaService, FileOperation, FileOperationType, CourseService
 
@@ -42,7 +43,8 @@ class AssignmentService:
             # This is relative to directory_path
             master_notebook_path=f"{ name }.ipynb",
             available_date=available_date,
-            due_date=due_date
+            due_date=due_date,
+            is_published=is_published
         )
 
         self.session.add(assignment)
@@ -70,13 +72,16 @@ class AssignmentService:
                 f"# { assignment.name }\n",
             ]
         }
-        master_notebook_content = json.dumps({ "cells": [otter_config_cell, title_cell], "metadata": {  "kernelspec": {   "display_name": "Python 3 (ipykernel)",   "language": "python",   "name": "python3"  },  "language_info": {   "codemirror_mode": {    "name": "ipython",    "version": 3   },   "file_extension": ".py",   "mimetype": "text/x-python",   "name": "python",   "nbconvert_exporter": "python",   "pygments_lexer": "ipython3",   "version": "3.11.5"  } }, "nbformat": 4, "nbformat_minor": 5})
+        
+        # See comment above commented out FileOperation below
+        # master_notebook_content = json.dumps({ "cells": [otter_config_cell, title_cell], "metadata": {  "kernelspec": {   "display_name": "Python 3 (ipykernel)",   "language": "python",   "name": "python3"  },  "language_info": {   "codemirror_mode": {    "name": "ipython",    "version": 3   },   "file_extension": ".py",   "mimetype": "text/x-python",   "name": "python",   "nbconvert_exporter": "python",   "pygments_lexer": "ipython3",   "version": "3.11.5"  } }, "nbformat": 4, "nbformat_minor": 5})
 
         gitignore_path = f"{ directory_path }/.gitignore"
         gitignore_content = await self.get_gitignore_content(assignment)
         
-        readme_path = f"{ directory_path }/README.md"
-        readme_content = f"# { name }"
+        # See comment above commented out FileOperation below
+        # readme_path = f"{ directory_path }/README.md"
+        # readme_content = f"# { name }"
 
         requirements_path = f"{ directory_path }/requirements.txt"
         requirements_content = f"otter-grader==5.5.0"
@@ -177,6 +182,9 @@ class AssignmentService:
         if "due_date" in update_fields:
             assignment.due_date = update_fields["due_date"]
 
+        if "is_published" in update_fields:
+            assignment.is_published = update_fields["is_published"]
+
         if assignment.available_date is not None and assignment.due_date is not None and assignment.available_date >= assignment.due_date:
             raise AssignmentDueBeforeOpenException
 
@@ -252,22 +260,22 @@ class InstructorAssignmentService(AssignmentService):
         self.instructor = instructor
         self.assignment = assignment
 
-    def get_is_available(self) -> bool:
-        if not self.assignment.is_created: return False
+    def _get_is_available(self) -> bool:
+        if not self.assignment.is_published: return False
 
         current_timestamp = self.session.scalar(func.current_timestamp())
         return current_timestamp >= self.assignment.available_date
     
-    def get_is_closed(self) -> bool:
-        if not self.assignment.is_created: return False
+    def _get_is_closed(self) -> bool:
+        if not self.assignment.is_published: return False
 
         current_timestamp = self.session.scalar(func.current_timestamp())
         return current_timestamp > self.assignment.due_date
     
     async def get_instructor_assignment_schema(self) -> InstructorAssignmentSchema:
         assignment = AssignmentSchema.from_orm(self.assignment).dict()
-        assignment["is_available"] = self.get_is_available()
-        assignment["is_closed"] = self.get_is_closed()
+        assignment["is_available"] = self._get_is_available()
+        assignment["is_closed"] = self._get_is_closed()
 
         return InstructorAssignmentSchema(**assignment)
     
@@ -310,34 +318,30 @@ class StudentAssignmentService(AssignmentService):
 
         return self.assignment.due_date + deferred_time + extra_time + self.student.base_extra_time
 
-    def get_is_available(self) -> bool:
-        if not self.assignment.is_created: return False
-
+    def _get_is_available(self) -> bool:
         current_timestamp = self.session.scalar(func.current_timestamp())
         return current_timestamp >= self.get_adjusted_available_date()
     
-    def get_is_closed(self) -> bool:
-        if not self.assignment.is_created: return False
-
+    def _get_is_closed(self) -> bool:
         current_timestamp = self.session.scalar(func.current_timestamp())
         return current_timestamp > self.get_adjusted_due_date()
 
     def validate_student_can_submit(self):
-        if not self.assignment.is_created:
-            raise AssignmentNotCreatedException()
+        if not self.assignment.is_published:
+            raise AssignmentNotPublishedException()
 
-        if not self.get_is_available():
+        if not self._get_is_available():
             raise AssignmentNotOpenException()
 
-        if self.get_is_closed():
+        if self._get_is_closed():
             raise AssignmentClosedException()
 
     async def get_student_assignment_schema(self) -> StudentAssignmentSchema:
         assignment = AssignmentSchema.from_orm(self.assignment).dict()
         assignment["adjusted_available_date"] = self.get_adjusted_available_date()
         assignment["adjusted_due_date"] = self.get_adjusted_due_date()
-        assignment["is_available"] = self.get_is_available()
-        assignment["is_closed"] = self.get_is_closed()
+        assignment["is_available"] = self._get_is_available()
+        assignment["is_closed"] = self._get_is_closed()
         assignment["is_deferred"] = assignment["adjusted_available_date"] != assignment["available_date"]
         assignment["is_extended"] = assignment["adjusted_due_date"] != assignment["due_date"]
 
