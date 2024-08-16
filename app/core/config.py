@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     # Gitea
     GITEA_SSH_URL: str
     GITEA_ASSIST_API_URL: str
-    GITEA_ASSIST_TOKEN: str
+    GITEA_ASSIST_AUTH_TOKEN: str
 
     # Appstore
     STUDENT_APPSTORE_HOST: str

@@ -39,7 +39,7 @@ class GiteaService:
             base_url=f"{ self.api_url }",
             headers={
                 "User-Agent": f"eduhelx_grader_api",
-                "Authorization": f"Bearer {settings.GITEA__ASSIST_TOKEN}" 
+                "Authorization": f"Bearer {settings.GITEA__ASSIST_AUTH_TOKEN}"
             },
             timeout=httpx.Timeout(10)
         )
