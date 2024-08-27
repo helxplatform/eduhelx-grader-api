@@ -20,9 +20,10 @@ class SubmissionService:
         self,
         student: StudentModel,
         assignment: AssignmentModel,
-        commit_id: str
+        commit_id: str,
+        student_notebook_content: bytes
     ) -> SubmissionModel:
-        from app.services import StudentAssignmentService, CourseService
+        from app.services import StudentAssignmentService, CourseService, LmsSyncService, CleanupService
 
         # TODO: We should validate that the submitted commit id actually exists in gitea before persisting it in the database.
         # We don't want another component of EduHeLx to assume the commit we return exists and crash when it doesn't.
@@ -43,6 +44,17 @@ class SubmissionService:
         self.session.add(submission)
         self.session.commit()
 
+        cleanup_service = CleanupService.Submission(self.session, submission)
+
+        try:
+            await LmsSyncService(self.session).upsync_submission(
+                submission,
+                student_notebook_content.encode()
+            )
+        except Exception as e:
+            await cleanup_service.undo_create_submission(delete_database_submission=True)
+            raise e
+
         dispatch(CreateSubmissionCrudEvent(submission=submission))
 
         return submission
@@ -57,6 +69,9 @@ class SubmissionService:
         if submission is None:
             raise SubmissionNotFoundException()
         return submission
+    
+    async def list_submissions(self) -> List[SubmissionModel]:
+        return self.session.query(SubmissionModel).all()
 
     async def get_submissions(
         self,
@@ -78,7 +93,7 @@ class SubmissionService:
     ) -> SubmissionModel:
         if moment is None: moment = get_now_with_tzinfo()
         submission = self.session.query(SubmissionModel) \
-            .filter_by(student_id=student.id, assignment_id=assignment.id) \
+            .filter_by(student_id=student.id, assignment_id=assignment.id, is_gradable=True) \
             .filter(SubmissionModel.submission_time <= moment) \
             .order_by(desc(SubmissionModel.submission_time)) \
             .limit(1) \

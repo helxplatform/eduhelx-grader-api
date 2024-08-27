@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from app.models import UserModel, CourseModel, GradeReportModel
+from app.models import UserModel, CourseModel, GradeReportModel, SubmissionModel
 from app.services import GiteaService, KubernetesService
 
 class CleanupService:
@@ -62,3 +62,13 @@ class CleanupService:
                     password=self.autogen_password,
                     user_type=self.user.user_type
                 )
+
+    class Submission:
+        def __init__(self, session: Session, submission: SubmissionModel):
+            self.session = session
+            self.submission = submission
+
+        async def undo_create_submission(self, delete_database_submission=False):
+            if delete_database_submission:
+                self.session.delete(self.submission)
+                self.session.commit()

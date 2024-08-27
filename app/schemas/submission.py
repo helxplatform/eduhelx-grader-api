@@ -5,9 +5,10 @@ from .assignment import AssignmentSchema
 
 class DatabaseSubmissionSchema(BaseModel):
     id: int
-    commit_id: str
+    commit_id: str | None
     graded: bool
     submission_time: datetime
+    is_gradable: bool
 
     class Config:
         orm_mode = True

@@ -8,6 +8,7 @@ from app.services.course_service import CourseService
 from app.services.ldap_service import LDAPService
 from app.services.assignment_service import AssignmentService
 from app.services.grading_service import GradingService
+from app.services.submission_service import SubmissionService
 from app.services.user.student_service import StudentService
 from app.services.user.instructor_service import InstructorService
 from app.models import AssignmentModel, SubmissionModel
@@ -25,6 +26,7 @@ class LmsSyncService:
         self.assignment_service = AssignmentService(session)
         self.student_service = StudentService(session)
         self.instructor_service = InstructorService(session)
+        self.submission_service = SubmissionService(session)
         self.grading_service = GradingService(session)
         self.ldap_service = LDAPService()
         self.session = session
@@ -195,6 +197,50 @@ class LmsSyncService:
 
         return canvas_instructors
     
+    async def sync_submissions(self):
+        db_students = await self.student_service.list_students()
+        db_assignments = await self.assignment_service.get_assignments()
+        canvas_students = await self.canvas_service.get_students()
+
+        db_submissions = await self.submission_service.list_submissions()
+        canvas_submissions = [
+            s["submission_history"]
+            for s in await self.canvas_service._get_submissions_for_assignments(
+                # Get all assignments
+                assignment_ids=None,
+                student_ids=[s["id"] for s in canvas_students],
+                include_submission_history=True,
+            )
+        ]
+
+        # NOTE: Canvas submissions cannot be deleted, so there's no need for that step.
+        """
+        A student only has one true submission per assignment in Canvas.
+        They also have a "submission history" but every submission shares the same id.
+        Thus, we must pair up submissions in sequence rather than identifier.
+        """
+
+        for student in canvas_students:
+            # 2U conversion
+            pid = student["sis_user_id"] if ":" not in student["sis_user_id"] else student["sis_user_id"].split(":")[0]
+            onyen = self.canvas_service.get_onyen_from_pid(pid)
+
+            db_student_submissions = [s for s in db_submissions if onyen == s.student.onyen]
+            canvas_student_submissions = [s for s in canvas_submissions if s["user_id"] == student["id"]]
+            for assignment in db_assignments:
+                db_assignment_submissions = [s for s in db_student_submissions if s.assignment_id == assignment.id]
+                canvas_assignment_submissions = [s for s in canvas_student_submissions if s["assignment_id"] == assignment.id]
+                
+                # A database assignment cannot be created without also creating a submission in Canvas.
+                canvas_submissions_to_downsync = canvas_assignment_submissions[len(db_assignment_submissions):]
+                for submission in canvas_submissions_to_downsync:
+                    await self.submission_service.create_submission(
+                        student=student,
+                        assignment=await self.assignment_service.get_assignment_by_id(assignment.id),
+                        commit_id=None
+                    )
+            
+    
     async def upsync_submission(
         self,
         submission: SubmissionModel,
@@ -255,4 +301,5 @@ class LmsSyncService:
         await self.sync_assignments()
         await self.sync_students()
         await self.sync_instructors()
+        await self.sync_submissions()
         print("Syncing complete")

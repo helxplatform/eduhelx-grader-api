@@ -47,8 +47,6 @@ async def update_assignment_fields(
     update_schema = UpdateAssignmentSchema(**updated_set_fields)
     assignment = await AssignmentService(db).update_assignment(assignment, update_schema)
 
-    await LmsSyncService(db).upsync_assignment(assignment)
-
     return assignment
 
 @router.get(

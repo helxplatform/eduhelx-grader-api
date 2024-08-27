@@ -4,6 +4,7 @@ from sqlalchemy import (
     Boolean, func
 )
 from sqlalchemy.orm import relationship, backref
+from sqlalchemy.ext.hybrid import hybrid_property
 from app.database import Base
 
 class SubmissionModel(Base):
@@ -12,7 +13,7 @@ class SubmissionModel(Base):
     id = Column(Integer, Sequence("submission_id_seq"), primary_key=True, autoincrement=True, index=True)
     student_id = Column(Integer, ForeignKey("student.id"), nullable=False)
     assignment_id = Column(Integer, ForeignKey("assignment.id"), nullable=False)
-    commit_id = Column(String(255), nullable=False)
+    commit_id = Column(String(255), nullable=True)
     graded = Column(Boolean(), server_default="f", nullable=False)
     submission_time = Column(DateTime(timezone=True), server_default=func.current_timestamp())
 
@@ -22,3 +23,7 @@ class SubmissionModel(Base):
         foreign_keys="SubmissionModel.assignment_id",
         backref=backref("submissions", cascade="all,delete")
     )
+
+    @hybrid_property
+    def is_gradable(self):
+        return self.commit_id is not None

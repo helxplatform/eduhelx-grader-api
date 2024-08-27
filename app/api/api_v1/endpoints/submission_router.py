@@ -31,12 +31,8 @@ async def create_submission(
     submission = await submission_service.create_submission(
         student,
         assignment,
-        commit_id=submission_body.commit_id
-    )
-
-    await LmsSyncService(db).upsync_submission(
-        submission,
-        submission_body.student_notebook_content.encode()
+        commit_id=submission_body.commit_id,
+        student_notebook_content=submission_body.student_notebook_content.encode()
     )
 
     return await submission_service.get_submission_schema(submission)
