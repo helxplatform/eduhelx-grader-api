@@ -1,3 +1,5 @@
+import httpx
+import base64
 from typing import List, Optional
 from enum import Enum
 from io import BytesIO
@@ -7,30 +9,10 @@ from dateutil import tz
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.core.config import settings
+from app.core.exceptions import GiteaBackendException
 from app.services import AssignmentService
-from app.schemas import CommitSchema
+from app.schemas import CommitSchema, FileOperation, FileOperationType, CollaboratorPermission
 from app.core.utils.header import parse_content_disposition_header
-import httpx
-import base64
-
-class FileOperationType(str, Enum):
-    CREATE = "create"
-    UPDATE = "update"
-    DELETE = "delete"
-
-class FileOperation(BaseModel):
-    # File content
-    content: str
-    # Path to file
-    path: str
-    # Rename an existing file
-    from_path: Optional[str] = None
-    operation: FileOperationType
-
-class CollaboratorPermission(str, Enum):
-    READ = "read"
-    WRITE = "write"
-    ADMIN = "admin"
 
 class GiteaService:
     def __init__(self, session: Session):
@@ -47,6 +29,12 @@ class GiteaService:
     @property
     def api_url(self) -> str:
         return settings.GITEA_ASSIST_API_URL
+    
+    async def _check_response(self, res: httpx.Response):
+        try:
+            res.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            raise GiteaBackendException.from_exception(e)
         
     async def _make_request(self, method: str, endpoint: str, headers={}, **kwargs):
         res = await self.client.request(
@@ -57,7 +45,7 @@ class GiteaService:
             },
             **kwargs
         )
-        res.raise_for_status()
+        await self._check_response(res)
         return res
 
     async def _get(self, endpoint: str, **kwargs):

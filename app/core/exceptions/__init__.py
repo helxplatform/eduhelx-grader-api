@@ -9,3 +9,4 @@ from .ldap import *
 from .appstore import *
 from .lms import *
 from .grading import *
+from .gitea import *

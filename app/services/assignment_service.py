@@ -1,14 +1,19 @@
 import json
 from typing import List
 from pydantic import PositiveInt
+from collections import Counter
 from datetime import datetime, timedelta
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-from app.core.exceptions.assignment import AssignmentCannotBeUnpublished
+from app.core.exceptions.assignment import AssignmentCannotBeUnpublished, AssignmentAlreadyExistsException
 from app.events import dispatch
 from app.models import AssignmentModel, InstructorModel, StudentModel, ExtraTimeModel
 from app.models.course import CourseModel
-from app.schemas import AssignmentSchema, InstructorAssignmentSchema, StudentAssignmentSchema, UpdateAssignmentSchema
+from app.schemas import (
+    AssignmentSchema, InstructorAssignmentSchema, StudentAssignmentSchema,
+    CreateAssignmentSchema, UpdateAssignmentSchema,
+    FileOperation, FileOperationType
+)
 from app.events import CreateAssignmentCrudEvent, ModifyAssignmentCrudEvent, DeleteAssignmentCrudEvent
 from app.core.exceptions import (
     AssignmentNotFoundException,
@@ -21,133 +26,159 @@ from app.core.exceptions import (
 from app.enums.assignment_status import AssignmentStatus
 from app.services.submission_service import SubmissionService
 
+AssignmentWithUpdate = tuple[AssignmentModel, UpdateAssignmentSchema]
+
 class AssignmentService:
     def __init__(self, session: Session):
         self.session = session
-        
-    async def create_assignment(
-        self,
-        id: int,
-        name: str,
-        directory_path: str,
-        max_attempts: PositiveInt | None,
-        available_date: datetime | None,
-        due_date: datetime | None,
-        is_published: bool
-    ) -> AssignmentModel:
-        from app.services import GiteaService, FileOperation, FileOperationType, CourseService
 
-        if available_date is not None and due_date is not None and available_date >= due_date:
-            raise AssignmentDueBeforeOpenException
+    async def validate_assignments(self, new_assignments: list[AssignmentModel] | None = None):
+        from app.services import LmsSyncService
+        
+        assignments = await self.get_assignments()
+        lms_assignments = await LmsSyncService(self.session).get_assignments()
+        if new_assignments is not None: assignments += new_assignments
+
+        id_count = Counter(a.id for a in assignments)
+        name_count = Counter(a.name for a in assignments)
+
+        id_violations = [i for i, count in id_count.items() if count > 1]
+        name_violations = [i for i, count in name_count.items() if count > 1]
+
+        if len(id_violations) > 0:
+            raise AssignmentAlreadyExistsException(f"assignment IDs { ', '.join(id_violations) } are already in use")
+
+        if len(name_violations) > 0:
+            raise AssignmentAlreadyExistsException(f"assignment names { ', '.join(name_violations) } are already in use")
+        
+        for assignment in assignments:
+            if (
+                assignment.available_date is not None and
+                assignment.due_date is not None and
+                assignment.available_date >= assignment.due_date
+            ):
+                raise AssignmentDueBeforeOpenException
+            
+            if not assignment.is_published:
+                canvas_assignment = [a for a in lms_assignments if a["id"] == assignment.id][0]
+                if not canvas_assignment["unpublishable"]:
+                    # The assignment is unpublished, but is not unpublishable.
+                    raise AssignmentCannotBeUnpublished(f"LMS does not permit assignment { assignment.id } to be unpublished")
+
+    async def create_assignments(
+        self,
+        assignments: list[CreateAssignmentSchema]
+    ) -> list[AssignmentModel]:
+        from app.services import GiteaService, CourseService, CleanupService
 
         gitea_service = GiteaService(self.session)
         course_service = CourseService(self.session)
-
-        assignment = AssignmentModel(
-            id=id,
-            name=name,
-            directory_path=directory_path,
-            # This is relative to directory_path
-            master_notebook_path=f"{ name }.ipynb",
-            max_attempts=max_attempts,
-            available_date=available_date,
-            due_date=due_date,
-            is_published=is_published
-        )
-
-        self.session.add(assignment)
-        self.session.commit()
 
         master_repository_name = await course_service.get_master_repository_name()
         owner = await course_service.get_instructor_gitea_organization_name()
         branch_name = await course_service.get_master_branch_name()
 
-        master_notebook_path = f"{ assignment.directory_path }/{ assignment.master_notebook_path }"
-        # Default empty notebook for JupyterLab 4 w/ Otter Config
-        otter_config_cell = {
-            "cell_type": "raw",
-            "metadata": {},
-            "source": [
-                "# ASSIGNMENT CONFIG\n",
-                "requirements: requirements.txt\n"
-                "export_cell: false\n"
-            ]
-        }
-        title_cell = {
-            "cell_type": "markdown",
-            "metadata": {},
-            "source": [
-                f"# { assignment.name }\n",
-            ]
-        }
-        
-        # See comment above commented out FileOperation below
-        # master_notebook_content = json.dumps({ "cells": [otter_config_cell, title_cell], "metadata": {  "kernelspec": {   "display_name": "Python 3 (ipykernel)",   "language": "python",   "name": "python3"  },  "language_info": {   "codemirror_mode": {    "name": "ipython",    "version": 3   },   "file_extension": ".py",   "mimetype": "text/x-python",   "name": "python",   "nbconvert_exporter": "python",   "pygments_lexer": "ipython3",   "version": "3.11.5"  } }, "nbformat": 4, "nbformat_minor": 5})
+        assignment_models = []
+        for assignment in assignments:
+            assignment_models.append(AssignmentModel(
+                id=assignment.id,
+                name=assignment.name,
+                directory_path=assignment.directory_path,
+                # This is relative to directory_path
+                master_notebook_path=f"{ assignment.name }.ipynb",
+                max_attempts=assignment.max_attempts,
+                available_date=assignment.available_date,
+                due_date=assignment.due_date,
+                is_published=assignment.is_published
+            ))
+        await self.validate_assignments(new_assignments=assignment_models)
 
-        gitignore_path = f"{ directory_path }/.gitignore"
-        gitignore_content = await self.get_gitignore_content(assignment)
-        
-        readme_path = f"{ directory_path }/README.md"
-        readme_content = f"# { name }"
+        # We could use bulk save to optimize here but it's really not necessary and there are drawbacks.
+        self.session.add_all(assignment_models)
+        self.session.commit()
 
-        requirements_path = f"{ directory_path }/requirements.txt"
-        requirements_content = f"otter-grader==5.5.0"
+        cleanup_service = CleanupService.Assignment(self.session, assignment_models)
 
-        files_to_modify = [
-            # Until toggleable workahead on assignments is implemented, there's no point in creating a master notebook
-            # for professors since they will need to make a new one to edit it anyways per the merge control policy.
-            # FileOperation(content=master_notebook_content, path=master_notebook_path, operation=FileOperationType.CREATE),
-            FileOperation(content=gitignore_content, path=gitignore_path, operation=FileOperationType.CREATE),
-            FileOperation(content=readme_content, path=readme_path, operation=FileOperationType.CREATE),
-            FileOperation(content=requirements_content, path=requirements_path, operation=FileOperationType.CREATE)
-        ]
-        
+        files_to_modify = [file for assignment in assignment_models for file in await self.get_default_assignment_files(assignment)]
         try:
             await gitea_service.modify_repository_files(
                 name=master_repository_name,
                 owner=owner,
                 branch_name=branch_name,
-                commit_message="Initialize assignment",
+                commit_message=f"Initialize assignments { ', '.join([str(a.id) for a in assignment_models]) }",
                 files=files_to_modify
             )
         except Exception as e:
-            self.session.delete(assignment)
-            self.session.commit()
+            await cleanup_service.undo_create_assignments()
             raise e
 
-        dispatch(CreateAssignmentCrudEvent(assignment=assignment))
+        for assignment in assignment_models:
+            dispatch(CreateAssignmentCrudEvent(assignment=assignment))
 
-        return assignment
+        return assignment_models
     
-    async def delete_assignment(self, assignment: AssignmentModel) -> None:
-        from app.services import GiteaService, CourseService, FileOperation, FileOperationType
+    async def create_assignment(self, assignment: CreateAssignmentSchema) -> AssignmentModel:
+        assignments = await self.create_assignments([assignment])
+        return assignments[0]
+    
+    async def update_assignments(
+        self,
+        assignments_with_updates: list[AssignmentWithUpdate]
+    ) -> list[AssignmentModel]:
+        from app.services.lms_sync_service import LmsSyncService
 
-        gitea_service = GiteaService(self.session)
-        course_service = CourseService(self.session)
+        for assignment, update_assignment in assignments_with_updates:
+            update_fields = update_assignment.dict(exclude_unset=True)
+            
+            if "name" in update_fields:
+                assignment.name = update_fields["name"]
 
-        master_repository_name = await course_service.get_master_repository_name()
-        owner = await course_service.get_instructor_gitea_organization_name()
-        branch_name = await course_service.get_master_branch_name()
-        directory_path = assignment.directory_path
+            if "directory_path" in update_fields:
+                assignment.directory_path = update_fields["directory_path"]
 
-        files_to_modify = [
-            FileOperation(content="", path=f"{ directory_path }", operation=FileOperationType.DELETE)
-        ]
+            if "master_notebook_path" in update_fields:
+                assignment.master_notebook_path = update_fields["master_notebook_path"]
 
-        """ (maybe) this can come back in the future.
-        But it violates the merge control policy if active, which is problematic at the moment."""
-        # await gitea_service.modify_repository_files(
-        #     name=master_repository_name,
-        #     owner=owner,
-        #     branch_name=branch_name,
-        #     commit_message=f"Delete assignment",
-        #     files=files_to_modify
-        # )
+            if "grader_question_feedback" in update_fields:
+                assignment.grader_question_feedback = update_fields["grader_question_feedback"]
 
-        self.session.delete(assignment)
+            if "max_attempts" in update_fields:
+                assignment.max_attempts = update_fields["max_attempts"]
+
+            if "available_date" in update_fields:
+                assignment.available_date = update_fields["available_date"]
+            
+            if "due_date" in update_fields:
+                assignment.due_date = update_fields["due_date"]
+
+            if "is_published" in update_fields:
+                assignment.is_published = update_fields["is_published"]
+
+        await self.validate_assignments()
         self.session.commit()
 
-        dispatch(DeleteAssignmentCrudEvent(assignment=assignment))
+        for assignment, update_assignment in assignments_with_updates:
+            update_fields = update_assignment.dict(exclude_unset=True)
+            dispatch(ModifyAssignmentCrudEvent(assignment=assignment, modified_fields=list(update_fields.keys())))
+
+        return [a for (a, _) in assignments_with_updates]
+    
+    async def update_assignment(self, assignment: AssignmentModel, update_assignment: UpdateAssignmentSchema) -> AssignmentModel:
+        assignments = await self.update_assignments([(assignment, update_assignment)])
+        return assignments[0]
+    
+    async def delete_assignments(self, assignments: list[AssignmentModel]) -> None:
+        from app.services import GiteaService, CourseService
+
+        for assignment in assignments:
+            self.session.delete(assignment)
+        self.session.commit()
+
+        for assignment in assignments:
+            dispatch(DeleteAssignmentCrudEvent(assignment=assignment))
+
+    async def delete_assignment(self, assignment: AssignmentModel) -> None:
+        await self.delete_assignments([assignment])
 
     async def get_assignment_by_id(self, id: int) -> AssignmentModel:
         assignment = self.session.query(AssignmentModel) \
@@ -169,53 +200,6 @@ class AssignmentService:
             raise AssignmentNotFoundException()
         return assignment
     
-    async def update_assignment(
-            self, 
-            assignment: AssignmentModel, 
-            update_assignment: UpdateAssignmentSchema, 
-            student_id: int | None = None
-    ) -> AssignmentModel:
-        from app.services.lms_sync_service import LmsSyncService
-
-        update_fields = update_assignment.dict(exclude_unset=True)
-        
-        if "name" in update_fields:
-            assignment.name = update_fields["name"]
-
-        if "directory_path" in update_fields:
-            assignment.directory_path = update_fields["directory_path"]
-
-        if "master_notebook_path" in update_fields:
-            assignment.master_notebook_path = update_fields["master_notebook_path"]
-
-        if "grader_question_feedback" in update_fields:
-            assignment.grader_question_feedback = update_fields["grader_question_feedback"]
-
-        if "max_attempts" in update_fields:
-            assignment.max_attempts = update_fields["max_attempts"]
-
-        if "available_date" in update_fields:
-            assignment.available_date = update_fields["available_date"]
-        
-        if "due_date" in update_fields:
-            assignment.due_date = update_fields["due_date"]
-
-        if "is_published" in update_fields:
-            if update_fields["is_published"] == False:
-                canvas_assignment = await LmsSyncService(self.session).get_assignment(assignment.id)
-                if canvas_assignment["unpublishable"] == False:
-                    raise AssignmentCannotBeUnpublished("Canvas is not allowing this assignment to be unpublished")
-            assignment.is_published = update_fields["is_published"]
-
-        if assignment.available_date is not None and assignment.due_date is not None and assignment.available_date >= assignment.due_date:
-            raise AssignmentDueBeforeOpenException()
-
-        self.session.commit()
-
-        dispatch(ModifyAssignmentCrudEvent(assignment=assignment, modified_fields=list(update_fields.keys())))
-
-        return assignment
-    
     # Get the earliest time at which the given assignment is available
     async def get_earliest_available_date(self, assignment: AssignmentModel) -> datetime | None:
         if assignment.available_date is None: return None
@@ -235,6 +219,47 @@ class AssignmentService:
             .first()
         
         return assignment.due_date + (latest_time.extra_time if latest_time.extra_time is not None else timedelta(0))
+    
+    """ Get the default files to be created in the assignment's directory. """
+    async def get_default_assignment_files(self, assignment: AssignmentModel) -> list[FileOperation]:
+        master_notebook_path = f"{ assignment.directory_path }/{ assignment.master_notebook_path }"
+        # Default empty notebook for JupyterLab 4 w/ Otter Config
+        otter_config_cell = {
+            "cell_type": "raw",
+            "metadata": {},
+            "source": [
+                "# ASSIGNMENT CONFIG\n",
+                "requirements: requirements.txt\n"
+                "export_cell: false\n"
+            ]
+        }
+        title_cell = {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                f"# { assignment.name }\n",
+            ]
+        }
+        
+        # master_notebook_content = json.dumps({ "cells": [otter_config_cell, title_cell], "metadata": {  "kernelspec": {   "display_name": "Python 3 (ipykernel)",   "language": "python",   "name": "python3"  },  "language_info": {   "codemirror_mode": {    "name": "ipython",    "version": 3   },   "file_extension": ".py",   "mimetype": "text/x-python",   "name": "python",   "nbconvert_exporter": "python",   "pygments_lexer": "ipython3",   "version": "3.11.5"  } }, "nbformat": 4, "nbformat_minor": 5})
+
+        gitignore_path = f"{ assignment.directory_path }/.gitignore"
+        gitignore_content = await self.get_gitignore_content(assignment)
+        
+        readme_path = f"{ assignment.directory_path }/README.md"
+        readme_content = f"# { assignment.name }"
+
+        requirements_path = f"{ assignment.directory_path }/requirements.txt"
+        requirements_content = f"otter-grader==5.5.0"
+
+        return [
+            # Until toggleable workahead on assignments is implemented, there's no point in creating a master notebook
+            # for professors since they will need to make a new one to edit it anyways per the merge control policy.
+            # FileOperation(content=master_notebook_content, path=master_notebook_path, operation=FileOperationType.CREATE),
+            FileOperation(content=gitignore_content, path=gitignore_path, operation=FileOperationType.CREATE),
+            FileOperation(content=readme_content, path=readme_path, operation=FileOperationType.CREATE),
+            FileOperation(content=requirements_content, path=requirements_path, operation=FileOperationType.CREATE)
+        ]
 
     """ Compute the default gitignore for an assignment. """
     async def get_gitignore_content(self, assignment: AssignmentModel) -> str:

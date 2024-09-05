@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
-from app.models import UserModel, CourseModel, GradeReportModel
+from app.models import UserModel, CourseModel, GradeReportModel, AssignmentModel
 from app.services import GiteaService, KubernetesService
+from app.core.exceptions import GiteaNotFoundException
 
 class CleanupService:
     class Grading:
@@ -62,3 +63,14 @@ class CleanupService:
                     password=self.autogen_password,
                     user_type=self.user.user_type
                 )
+
+    class Assignment:
+        def __init__(self, session: Session, assignments: list[AssignmentModel]):
+            self.session = session
+            self.assignments = assignments
+
+        async def undo_create_assignments(self, delete_database_assignments=False):
+            if delete_database_assignments:
+                for assignment in self.assignments:
+                    self.session.delete(assignment)
+                self.session.commit()

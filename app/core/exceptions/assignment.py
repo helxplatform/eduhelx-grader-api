@@ -1,7 +1,12 @@
 from .base import CustomException
 
+class AssignmentAlreadyExistsException(CustomException):
+    code = 409
+    error_code = "ASSIGNMENT__ALREADY_EXISTS"
+    message = "assignment id or name already in use"
+
 class AssignmentDueBeforeOpenException(CustomException):
-    code = 400
+    code = 409
     error_code = "ASSIGNMENT__DUE_BEFORE_OPEN"
     message = "assignment cannot be due before it has opened"
 
@@ -31,6 +36,6 @@ class AssignmentNotFoundException(CustomException):
     message = "assignment not found"
 
 class AssignmentCannotBeUnpublished(CustomException):
-    code = 400
+    code = 409
     error_code = "ASSIGNMENT__CANNOT_BE_UNPUBLISHED"
     message = "assignment cannot be unpublished"

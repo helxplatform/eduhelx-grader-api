@@ -24,6 +24,15 @@ class AssignmentSchema(BaseModel):
     class Config:
         orm_mode = True
 
+class CreateAssignmentSchema(BaseModel):
+    id: int
+    name: str
+    directory_path: str
+    max_attempts: PositiveInt | None
+    available_date: datetime | None
+    due_date: datetime | None
+    is_published: bool
+
 class UpdateAssignmentSchema(BaseModel):
     name: str = UNSET
     directory_path: str = UNSET

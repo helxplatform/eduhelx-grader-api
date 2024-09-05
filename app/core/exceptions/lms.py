@@ -1,21 +1,6 @@
 from httpx import Response
 from .base import CustomException
 
-class LMSNoAssignmentFetchedException(CustomException):
-    code = 404
-    error_code = "LMS__NO_ASSIGNMENT_FETCHED"
-    message = "Failed to fetch assignment from LMS"
-
-class LMSNoCourseFetchedException(CustomException):
-    code = 404
-    error_code = "LMS__NO_COURSE_FETCHED"
-    message = "Failed to fetch course from LMS"
-
-class LMSNoStudentsFetchedException(CustomException):
-    code = 404
-    error_code = "LMS__NO_STUDENTS_FETCHED"
-    message = "Failed to fetch students from LMS"
-
 class LMSUserNotFoundException(CustomException):
     code = 404
     error_code = "LMS__USER_NOT_FOUND"
@@ -50,3 +35,8 @@ class LMSBackendException(CustomException):
     def __init__(self, message: str | None = None, response: Response | None = None):
         super().__init__(message)
         self.response = response
+
+    @property
+    def status_code(self) -> int | None:
+        if self.response: return self.response.status_code
+        return None

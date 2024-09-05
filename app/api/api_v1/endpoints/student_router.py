@@ -33,18 +33,6 @@ async def list_students(
     students = await StudentService(db).list_students()
     return students
 
-@router.post("/students", response_model=StudentSchema)
-async def create_student_with_autogen_password(
-    *,
-    db: Session = Depends(get_db),
-    perm: None = Depends(PermissionDependency(StudentCreatePermission)),
-    student_body: CreateStudentBody
-):
-    student = await StudentService(db).create_student(
-        **student_body.dict()
-    )
-    return student
-
 @router.put("/students/self/fork_cloned", response_model=None)
 async def mark_fork_as_cloned(
     *,

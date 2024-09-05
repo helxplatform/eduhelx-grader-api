@@ -7,3 +7,4 @@ from .jwt import *
 from .commit import *
 from .settings import *
 from .grade_report import *
+from .gitea import *

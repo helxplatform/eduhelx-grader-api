@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import MultipleResultsFound, NoResultFound
 from app.events import dispatch
 from app.models import CourseModel
-from app.schemas import CourseWithInstructorsSchema, CourseSchema, UpdateCourseSchema
+from app.schemas import CourseWithInstructorsSchema, CourseSchema, UpdateCourseSchema, FileOperation, FileOperationType
 from app.events import CreateCourseCrudEvent, ModifyCourseCrudEvent, DeleteCourseCrudEvent
 from app.core.exceptions import MultipleCoursesExistException, NoCourseExistsException, CourseAlreadyExistsException
 
@@ -32,7 +32,7 @@ class CourseService:
 
     
     async def create_course(self, name: str, start_at: datetime = None, end_at: datetime = None) -> CourseModel:
-        from app.services import GiteaService, CleanupService, FileOperation, FileOperationType
+        from app.services import GiteaService, CleanupService
 
         try:
             await self.get_course()

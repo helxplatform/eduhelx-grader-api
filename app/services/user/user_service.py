@@ -1,3 +1,5 @@
+import asyncio
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.events import dispatch
 from app.models import UserModel, AutoPasswordAuthModel
@@ -12,6 +14,11 @@ from app.core.exceptions import (
     UserNotFoundException,
     PasswordDoesNotMatchException
 )
+
+class UserCleanupMetadata(BaseModel):
+    database_user_hit: bool = False
+    password_secret_hit: bool = False
+    gitea_user_hit: bool = False
 
 class UserService:
     def __init__(self, session: Session):
@@ -78,21 +85,22 @@ class UserService:
 
         return autogen_password
 
+    """ We can't unpurge a Gitea user, so no batch user deletion currently, since we
+    can't cleanup if a failure is encountered in the middle of deleting Gitea users. """
     async def delete_user(
         self,
-        onyen: str
+        user: UserModel
     ) -> None:
         from app.services import GiteaService, KubernetesService, CourseService, CleanupService
         
         course = await CourseService(self.session).get_course()
-        user = await self.get_user_by_onyen(onyen)
 
-        password = KubernetesService().get_autogen_password(course.name, onyen)
+        password = KubernetesService().get_autogen_password(course.name, user.onyen)
         cleanup_service = CleanupService.User(self.session, user, password)
 
-        KubernetesService().delete_credential_secret(course.name, onyen)
+        KubernetesService().delete_credential_secret(course.name, user.onyen)
         try:
-            await GiteaService().delete_user(onyen, purge=True)
+            await GiteaService(self.session).delete_user(user.onyen, purge=True)
         except Exception as e:
             await cleanup_service.undo_delete_user(create_password_secret=True)
             raise e
