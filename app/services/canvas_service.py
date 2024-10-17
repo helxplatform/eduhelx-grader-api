@@ -107,7 +107,8 @@ class CanvasService:
     """ NOTE: include_submission_history includes the returned Submission as its final element. """
     async def _get_submissions_for_assignments(
         self,
-        assignment_ids: list[int],
+        # Return submissions for all assignments if not provided
+        assignment_ids: list[int] | None,
         student_ids: list[int],
         *,
         # Note: I believe submission_history generally includes the active submission as well.
@@ -126,10 +127,11 @@ class CanvasService:
         if include_is_read: include.append("read_status")
 
         params = {
-            "assignment_ids[]": assignment_ids,
             "student_ids[]": student_ids,
             "include[]": include,
         }
+        if assignment_ids is not None: params["assignment_ids[]"] = assignment_ids
+
         if workflow_state_filter is not None:
             params["workflow_state"] = workflow_state_filter.value
         return await self._get(f"courses/{ settings.CANVAS_COURSE_ID }/students/submissions", params=params)

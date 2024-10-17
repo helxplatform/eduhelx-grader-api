@@ -213,6 +213,8 @@ class AssignmentService:
         if assignment.available_date is not None and assignment.due_date is not None and assignment.available_date >= assignment.due_date:
             raise AssignmentDueBeforeOpenException()
 
+        await LmsSyncService(self.session).upsync_assignment(assignment)
+        
         self.session.commit()
 
         dispatch(ModifyAssignmentCrudEvent(assignment=assignment, modified_fields=list(update_fields.keys())))
